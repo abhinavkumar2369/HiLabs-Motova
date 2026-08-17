@@ -3,27 +3,29 @@ const pool = require("../config/db");
 
 // POST /api/v1/auth/signup
 async function signup(req, res) {
-  const { name, email, phoneNumber, password } = req.body;
+  const { name, email, password } = req.body;
 
-  if (!name || !email || !phoneNumber || !password) {
+  if (!name || !email || !password) {
     return res.status(400).json({ success: false, message: "All fields are required" });
   }
 
   try {
     const existing = await pool.query(
-      "SELECT id FROM users WHERE email = $1 OR phone_number = $2",
-      [email, phoneNumber]
+      "SELECT id FROM users WHERE email = $1",
+      [email]
     );
     if (existing.rows.length > 0) {
-      return res.status(409).json({ success: false, message: "Email or phone number already registered" });
+      return res.status(409).json({ success: false, message: "Email already registered" });
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
 
     const result = await pool.query(
-      `INSERT INTO users (name, email, phone_number, password_hash)
-       VALUES ($1, $2, $3, $4) RETURNING id, name, email, phone_number`,
-      [name, email, phoneNumber, passwordHash]
+      `INSERT INTO users
+      (name, email, password_hash)
+      VALUES ($1, $2, $3)
+      RETURNING id, name, email, created_at`,
+      [name, email, passwordHash]
     );
     const user = result.rows[0];
 
