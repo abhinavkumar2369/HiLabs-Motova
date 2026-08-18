@@ -1,6 +1,6 @@
 ## DOCUMENTATION
 
-```
+```md
 ### Postgresql Database
 DB_USER = 
 DB_HOST = 
@@ -27,37 +27,56 @@ CREATE TABLE IF NOT EXISTS users (
     name VARCHAR(100) NOT NULL,
     email VARCHAR(150) UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
-    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
-    otp_code VARCHAR(6),
-    otp_expires_at TIMESTAMPTZ,
+    reset_otp_code VARCHAR(6),
+    reset_otp_expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-
 ```
-### OTP Auth Flow
-1. `POST /api/v1/auth/signup` — creates the user (unverified), generates a 6-digit OTP, stores it with a 10 minute expiry, and emails it via Resend. No access token is returned yet.
 
+## Sign Up
+
+`POST /api/v1/auth/signup`
+#### Request
+```json
+{
+    "name": "...",
+    "email": "...",
+    "password": "..."
+}
+```
+
+#### Response
 ```json
 {
     "success": true,
-    "message": "Signup successful. Please verify the OTP sent to your email",
+    "message": "Signup successful",
     "data": {
         "user": {
             "id": "...",
             "name": "...",
             "email": "..."
-        }
+        },
+        "access_token": "...."
     }
 }
 ```
+## Sign In
 
-2. `POST /api/v1/auth/verify-otp` — body: `{ "email": "...", "otp": "123456" }`. Validates the OTP, marks the user verified, clears the OTP, and returns an access token.
+`POST /api/v1/auth/signin`
+#### Request
+```json
+{
+    "email": "...",
+    "password": "..."
+}
+```
 
+#### Response
 ```json
 {
     "success": true,
-    "message": "Email verified successfully",
+    "message": "Signin successful",
     "data": {
         "user": {
             "id": "...",
@@ -69,9 +88,68 @@ CREATE TABLE IF NOT EXISTS users (
 }
 ```
 
-3. `POST /api/v1/auth/resend-otp` — body: `{ "email": "..." }`. Generates and emails a new OTP for an unverified user.
+## Forgot Password Flow
+
+1. `POST /api/v1/auth/forgot-password` —
+If the email is registered, generates a 6-digit OTP with a 10 minute expiry, stores it, and emails it via Resend.
+
+#### Request
+```json
+{ 
+    "email": "..."
+}
+```
+
+#### Response
+```json
+{
+    "success": true,
+    "message": "If that email is registered, an OTP has been sent"
+}
+```
+
+2. `POST /api/v1/auth/verify-reset-otp`
+User receives the OTP by email, then Validates the OTP (single-use, cleared once verified) and returns a short-lived `reset_token` (valid for 10 minutes).
 
 
+#### Request
+```json
+{ 
+    "email": "...",
+    "otp": "123456" 
+}
+```
 
+#### Response
+```json
+{
+    "success": true,
+    "message": "OTP verified",
+    "data": {
+        "reset_token": "...."
+    }
+}
+```
+
+3.`POST /api/v1/auth/reset-password`
+On the "set new password" screen. Validates the reset token and updates the password.
+
+#### Request
+```json
+{ 
+    "resetToken": "....",
+    "newPassword": "..." 
+}
+```
+
+#### Response
+```json
+{
+    "success": true,
+    "message": "Password reset successfully"
+}
+```
 
 Get `RESEND_API_KEY` from the [Resend dashboard](https://resend.com/api-keys). `RESEND_FROM_EMAIL` must be a verified sender/domain in Resend (use `onboarding@resend.dev` for testing).
+
+

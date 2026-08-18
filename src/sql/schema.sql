@@ -8,13 +8,14 @@ CREATE TABLE IF NOT EXISTS users (
     name VARCHAR(100) NOT NULL,
     email VARCHAR(150) UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
-    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
-    otp_code VARCHAR(6),
-    otp_expires_at TIMESTAMPTZ,
+    reset_otp_code VARCHAR(6),
+    reset_otp_expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Run this if the `users` table already exists from an earlier version:
--- ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN NOT NULL DEFAULT FALSE;
--- ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_code VARCHAR(6);
--- ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_expires_at TIMESTAMPTZ;
+-- ALTER TABLE users DROP COLUMN IF EXISTS is_verified;
+-- ALTER TABLE users DROP COLUMN IF EXISTS otp_code;
+-- ALTER TABLE users DROP COLUMN IF EXISTS otp_expires_at;
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_otp_code VARCHAR(6);
+-- ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_otp_expires_at TIMESTAMPTZ;
