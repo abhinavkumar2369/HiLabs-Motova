@@ -1,22 +1,35 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 
 const pool = require("../config/db");
 const resend = require("../config/resend");
 
 const OTP_EXPIRY_MINUTES = 10;
 
-const generateOtp = () =>
-  String(Math.floor(100000 + Math.random() * 900000));
+// Generate secure 4-digit OTP
+const generateOtp = () => {
+  return crypto.randomInt(1000, 10000).toString();
+};
 
+// Send OTP email
 const sendOtpEmail = async (email, otp) => {
   await resend.emails.send({
     from: process.env.RESEND_FROM_EMAIL,
     to: email,
     subject: "Reset your password",
-    html: `<p>Your password reset code is <strong>${otp}</strong>. It expires in ${OTP_EXPIRY_MINUTES} minutes.</p>`,
+    html: `
+      <p>Your password reset code is:</p>
+      <h2>${otp}</h2>
+      <p>This OTP expires in ${OTP_EXPIRY_MINUTES} minutes.</p>
+      <p>If you did not request a password reset, please ignore this email.</p>
+    `,
   });
 };
+
+// ======================================================
+// SIGNUP
+// ======================================================
 
 const signup = async (req, res) => {
   try {
@@ -78,7 +91,7 @@ const signup = async (req, res) => {
       });
     }
 
-    // 8. Generate JWT token
+    // 8. Generate JWT access token
     const accessToken = jwt.sign(
       {
         userId: user.id,
@@ -103,11 +116,10 @@ const signup = async (req, res) => {
         access_token: accessToken,
       },
     });
-
   } catch (error) {
     console.error("Signup error:", error);
 
-    // Handle PostgreSQL duplicate email race condition
+    // PostgreSQL duplicate email race condition
     if (error.code === "23505") {
       return res.status(409).json({
         success: false,
@@ -122,10 +134,15 @@ const signup = async (req, res) => {
   }
 };
 
+// ======================================================
+// SIGNIN
+// ======================================================
+
 const signin = async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    // Validate required fields
     if (!email || !password) {
       return res.status(400).json({
         success: false,
@@ -133,6 +150,7 @@ const signin = async (req, res) => {
       });
     }
 
+    // Find user
     const result = await pool.query(
       `SELECT id, name, email, password_hash
        FROM users
@@ -142,6 +160,7 @@ const signin = async (req, res) => {
 
     const user = result.rows[0];
 
+    // User does not exist
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -149,7 +168,11 @@ const signin = async (req, res) => {
       });
     }
 
-    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    // Compare password
+    const isPasswordValid = await bcrypt.compare(
+      password,
+      user.password_hash
+    );
 
     if (!isPasswordValid) {
       return res.status(401).json({
@@ -158,6 +181,7 @@ const signin = async (req, res) => {
       });
     }
 
+    // Check JWT secret
     if (!process.env.JWT_SECRET) {
       console.error("JWT_SECRET is not configured");
 
@@ -167,6 +191,7 @@ const signin = async (req, res) => {
       });
     }
 
+    // Generate access token
     const accessToken = jwt.sign(
       {
         userId: user.id,
@@ -178,6 +203,7 @@ const signin = async (req, res) => {
       }
     );
 
+    // Send response
     return res.status(200).json({
       success: true,
       message: "Signin successful",
@@ -190,7 +216,6 @@ const signin = async (req, res) => {
         access_token: accessToken,
       },
     });
-
   } catch (error) {
     console.error("Signin error:", error);
 
@@ -201,11 +226,16 @@ const signin = async (req, res) => {
   }
 };
 
-// Step 1: user submits email, receives an OTP
+// ======================================================
+// FORGOT PASSWORD - STEP 1
+// Send OTP to user's email
+// ======================================================
+
 const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
 
+    // Validate email
     if (!email) {
       return res.status(400).json({
         success: false,
@@ -213,6 +243,7 @@ const forgotPassword = async (req, res) => {
       });
     }
 
+    // Find user
     const result = await pool.query(
       `SELECT id, email
        FROM users
@@ -222,7 +253,7 @@ const forgotPassword = async (req, res) => {
 
     const user = result.rows[0];
 
-    // Do not reveal whether the email exists
+    // Do not reveal whether email exists
     if (!user) {
       return res.status(200).json({
         success: true,
@@ -230,23 +261,30 @@ const forgotPassword = async (req, res) => {
       });
     }
 
+    // Generate 4-digit OTP
     const otp = generateOtp();
-    const otpExpiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
+    // OTP expires after 10 minutes
+    const otpExpiresAt = new Date(
+      Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000
+    );
+
+    // Save OTP in database
     await pool.query(
       `UPDATE users
-       SET reset_otp_code = $1, reset_otp_expires_at = $2
+       SET reset_otp_code = $1,
+           reset_otp_expires_at = $2
        WHERE id = $3`,
       [otp, otpExpiresAt, user.id]
     );
 
+    // Send OTP email
     await sendOtpEmail(user.email, otp);
 
     return res.status(200).json({
       success: true,
       message: "If that email is registered, an OTP has been sent",
     });
-
   } catch (error) {
     console.error("Forgot password error:", error);
 
@@ -257,11 +295,16 @@ const forgotPassword = async (req, res) => {
   }
 };
 
-// Step 2: user submits the OTP received; on success gets a short-lived reset token
+// ======================================================
+// VERIFY RESET OTP - STEP 2
+// Verify OTP and generate reset token
+// ======================================================
+
 const verifyResetOtp = async (req, res) => {
   try {
     const { email, otp } = req.body;
 
+    // Validate required fields
     if (!email || !otp) {
       return res.status(400).json({
         success: false,
@@ -269,6 +312,15 @@ const verifyResetOtp = async (req, res) => {
       });
     }
 
+    // Validate OTP format
+    if (!/^\d{4}$/.test(otp)) {
+      return res.status(400).json({
+        success: false,
+        message: "OTP must be a 4-digit number",
+      });
+    }
+
+    // Find user
     const result = await pool.query(
       `SELECT id, reset_otp_code, reset_otp_expires_at
        FROM users
@@ -285,6 +337,7 @@ const verifyResetOtp = async (req, res) => {
       });
     }
 
+    // Check OTP exists and has not expired
     if (
       !user.reset_otp_code ||
       !user.reset_otp_expires_at ||
@@ -296,6 +349,7 @@ const verifyResetOtp = async (req, res) => {
       });
     }
 
+    // Check OTP
     if (user.reset_otp_code !== otp) {
       return res.status(401).json({
         success: false,
@@ -303,6 +357,7 @@ const verifyResetOtp = async (req, res) => {
       });
     }
 
+    // Check JWT secret
     if (!process.env.JWT_SECRET) {
       console.error("JWT_SECRET is not configured");
 
@@ -312,14 +367,16 @@ const verifyResetOtp = async (req, res) => {
       });
     }
 
-    // OTP is single-use: clear it now that it has been verified
+    // Clear OTP because it is single-use
     await pool.query(
       `UPDATE users
-       SET reset_otp_code = NULL, reset_otp_expires_at = NULL
+       SET reset_otp_code = NULL,
+           reset_otp_expires_at = NULL
        WHERE id = $1`,
       [user.id]
     );
 
+    // Generate short-lived reset token
     const resetToken = jwt.sign(
       {
         userId: user.id,
@@ -338,7 +395,6 @@ const verifyResetOtp = async (req, res) => {
         reset_token: resetToken,
       },
     });
-
   } catch (error) {
     console.error("Verify reset OTP error:", error);
 
@@ -349,11 +405,16 @@ const verifyResetOtp = async (req, res) => {
   }
 };
 
-// Step 3: user submits the reset token from verify-reset-otp along with the new password
+// ======================================================
+// RESET PASSWORD - STEP 3
+// Reset password using reset token
+// ======================================================
+
 const resetPassword = async (req, res) => {
   try {
     const { resetToken, newPassword } = req.body;
 
+    // Validate required fields
     if (!resetToken || !newPassword) {
       return res.status(400).json({
         success: false,
@@ -361,6 +422,7 @@ const resetPassword = async (req, res) => {
       });
     }
 
+    // Validate password
     if (newPassword.length < 8) {
       return res.status(422).json({
         success: false,
@@ -368,6 +430,7 @@ const resetPassword = async (req, res) => {
       });
     }
 
+    // Check JWT secret
     if (!process.env.JWT_SECRET) {
       console.error("JWT_SECRET is not configured");
 
@@ -377,9 +440,14 @@ const resetPassword = async (req, res) => {
       });
     }
 
+    // Verify reset token
     let payload;
+
     try {
-      payload = jwt.verify(resetToken, process.env.JWT_SECRET);
+      payload = jwt.verify(
+        resetToken,
+        process.env.JWT_SECRET
+      );
     } catch (err) {
       return res.status(401).json({
         success: false,
@@ -387,6 +455,7 @@ const resetPassword = async (req, res) => {
       });
     }
 
+    // Check token purpose
     if (payload.purpose !== "password_reset") {
       return res.status(401).json({
         success: false,
@@ -394,8 +463,13 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    const passwordHash = await bcrypt.hash(newPassword, 12);
+    // Hash new password
+    const passwordHash = await bcrypt.hash(
+      newPassword,
+      12
+    );
 
+    // Update password
     const result = await pool.query(
       `UPDATE users
        SET password_hash = $1
@@ -404,6 +478,7 @@ const resetPassword = async (req, res) => {
       [passwordHash, payload.userId]
     );
 
+    // User not found
     if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -415,7 +490,6 @@ const resetPassword = async (req, res) => {
       success: true,
       message: "Password reset successfully",
     });
-
   } catch (error) {
     console.error("Reset password error:", error);
 
@@ -425,6 +499,10 @@ const resetPassword = async (req, res) => {
     });
   }
 };
+
+// ======================================================
+// EXPORT CONTROLLERS
+// ======================================================
 
 module.exports = {
   signup,
