@@ -12,9 +12,13 @@ DB_PORT =
 JWT_SECRET=
 JWT_EXPIRES_IN=
 
-### Resend (OTP emails)
-RESEND_API_KEY=
-RESEND_FROM_EMAIL=
+### Nodemailer (OTP emails)
+SMTP_HOST=
+SMTP_PORT=
+SMTP_SECURE=       # true/false
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM_EMAIL=
 ```
 
 
@@ -116,7 +120,7 @@ User receives the OTP by email, then Validates the OTP (single-use, cleared once
 ```json
 { 
     "email": "...",
-    "otp": "123456" 
+    "otp": "1234" 
 }
 ```
 

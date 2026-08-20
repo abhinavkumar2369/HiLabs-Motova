@@ -3,7 +3,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 
 const pool = require("../config/db");
-const resend = require("../config/resend");
+const transporter = require("../config/mailer");
 
 const OTP_EXPIRY_MINUTES = 10;
 
@@ -14,8 +14,8 @@ const generateOtp = () => {
 
 // Send OTP email
 const sendOtpEmail = async (email, otp) => {
-  await resend.emails.send({
-    from: process.env.RESEND_FROM_EMAIL,
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM_EMAIL,
     to: email,
     subject: "Reset your password",
     html: `
